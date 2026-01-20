@@ -60,59 +60,211 @@ app.post("/generate-ad", async (req, res) => {
         ? `Write a 2-line catchy advertisement with emojis for animal feed product: "${product}". Maximum 25 words. No hashtags. Just the ad text.`
         : `Create a compelling social media advertisement for animal feed product: "${product}". Include emojis and farming hashtags. Keep it under 100 words. Make it engaging for farmers.`;
 
-      const textResponse = await fetch("https://text.pollinations.ai/", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messages: [
-            {
-              role: "system",
-              content: "You are a creative marketing expert for agricultural and livestock businesses. Create compelling, concise advertisements."
-            },
-            {
-              role: "user",
-              content: textPrompt
-            }
-          ],
-          model: "openai",
-          seed: Date.now(),
-          jsonMode: false
-        })
-      });
+      // Method 1: Try direct prompt API (most reliable for Pollinations.ai)
+      try {
+        console.log("Trying direct prompt API...");
+        const promptUrl = `https://text.pollinations.ai/prompt/${encodeURIComponent(textPrompt)}?model=openai&seed=${Date.now()}`;
+        const getResponse = await fetch(promptUrl, {
+          method: "GET",
+          headers: {
+            "Accept": "text/plain",
+            "User-Agent": "Mozilla/5.0"
+          },
+          timeout: 30000
+        });
 
-      if (textResponse.ok) {
-        let generatedText = await textResponse.text();
-        
-        // Clean up the text
-        generatedText = generatedText
-          .replace(/^["']|["']$/g, '') // Remove quotes
-          .replace(/^Advertisement:\s*/i, "")
-          .replace(/^Ad:\s*/i, "")
-          .trim();
+        if (getResponse.ok) {
+          let generatedText = await getResponse.text();
+          
+          // Clean up the text
+          generatedText = generatedText
+            .replace(/^["']|["']$/g, '')
+            .replace(/^Advertisement:\s*/i, "")
+            .replace(/^Ad:\s*/i, "")
+            .replace(/^Here's.*?:\s*/i, "")
+            .replace(/^Generated.*?:\s*/i, "")
+            .replace(/^\s*\{[^}]*\}\s*/g, '') // Remove JSON objects if any
+            .trim();
 
-        // For short format, keep only first 2 lines
-        if (isShortFormat) {
-          const lines = generatedText.split('\n').filter(line => line.trim());
-          generatedText = lines.slice(0, 2).join('\n');
+          // For short format, keep only first 2 lines
+          if (isShortFormat) {
+            const lines = generatedText.split('\n').filter(line => line.trim());
+            generatedText = lines.slice(0, 2).join('\n');
+          }
+
+          // Validate length (more lenient)
+          const minLength = isShortFormat ? 10 : 30;
+          const maxLength = isShortFormat ? 400 : 1000;
+
+          if (generatedText.length >= minLength && generatedText.length <= maxLength && !generatedText.includes('error') && !generatedText.includes('Error')) {
+            console.log("✅ Success with Pollinations.ai GET (prompt) text generation");
+            console.log("Generated text:", generatedText);
+            return res.json({ 
+              caption: generatedText,
+              model: "pollinations-ai"
+            });
+          } else {
+            console.log(`Text validation failed: length=${generatedText.length}, contains errors=${generatedText.includes('error')}`);
+          }
+        } else {
+          console.log(`GET method returned status: ${getResponse.status}`);
         }
-
-        // Validate length
-        const minLength = isShortFormat ? 20 : 40;
-        const maxLength = isShortFormat ? 200 : 600;
-
-        if (generatedText.length > minLength && generatedText.length < maxLength) {
-          console.log("✅ Success with Pollinations.ai text generation");
-          console.log("Generated text:", generatedText);
-          return res.json({ 
-            caption: generatedText,
-            model: "pollinations-ai"
-          });
-        }
+      } catch (getError) {
+        console.error("Pollinations.ai GET (prompt) error:", getError.message);
       }
 
-      console.log("Pollinations.ai text generation failed, using templates");
+      // Method 2: Try POST with messages array
+      try {
+        console.log("Trying POST method with messages array...");
+        const postResponse = await fetch("https://text.pollinations.ai/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            messages: [
+              {
+                role: "system",
+                content: "You are a creative marketing expert for agricultural and livestock businesses. Create compelling, concise advertisements. Return only the ad text, no explanations."
+              },
+              {
+                role: "user",
+                content: textPrompt
+              }
+            ],
+            model: "openai",
+            seed: Date.now()
+          })
+        });
+
+        if (postResponse.ok) {
+          let generatedText = await postResponse.text();
+          
+          // Clean up the text
+          generatedText = generatedText
+            .replace(/^["']|["']$/g, '') // Remove quotes
+            .replace(/^Advertisement:\s*/i, "")
+            .replace(/^Ad:\s*/i, "")
+            .replace(/^Here's.*?:\s*/i, "")
+            .replace(/^Generated.*?:\s*/i, "")
+            .trim();
+
+          // For short format, keep only first 2 lines
+          if (isShortFormat) {
+            const lines = generatedText.split('\n').filter(line => line.trim());
+            generatedText = lines.slice(0, 2).join('\n');
+          }
+
+          // Validate length (more lenient)
+          const minLength = isShortFormat ? 10 : 30;
+          const maxLength = isShortFormat ? 400 : 1000;
+
+          if (generatedText.length >= minLength && generatedText.length <= maxLength) {
+            console.log("✅ Success with Pollinations.ai POST (messages) text generation");
+            console.log("Generated text:", generatedText);
+            return res.json({ 
+              caption: generatedText,
+              model: "pollinations-ai"
+            });
+          } else {
+            console.log(`Text length ${generatedText.length} outside valid range ${minLength}-${maxLength}`);
+          }
+        } else {
+          console.log(`POST method returned status: ${postResponse.status}`);
+        }
+      } catch (postError) {
+        console.error("Pollinations.ai POST (messages) error:", postError.message);
+      }
+
+      // Method 2: Try GET with prompt parameter
+      try {
+        console.log("Trying GET method with prompt parameter...");
+        const textUrl = `https://text.pollinations.ai/prompt/${encodeURIComponent(textPrompt)}?model=openai&seed=${Date.now()}`;
+        
+        const textResponse = await fetch(textUrl, {
+          method: "GET",
+          headers: {
+            "Accept": "text/plain",
+            "User-Agent": "Mozilla/5.0"
+          }
+        });
+
+        if (textResponse.ok) {
+          let generatedText = await textResponse.text();
+          
+          generatedText = generatedText
+            .replace(/^["']|["']$/g, '')
+            .replace(/^Advertisement:\s*/i, "")
+            .replace(/^Ad:\s*/i, "")
+            .replace(/^Here's.*?:\s*/i, "")
+            .trim();
+
+          if (isShortFormat) {
+            const lines = generatedText.split('\n').filter(line => line.trim());
+            generatedText = lines.slice(0, 2).join('\n');
+          }
+
+          const minLength = isShortFormat ? 10 : 30;
+          const maxLength = isShortFormat ? 400 : 1000;
+
+          if (generatedText.length >= minLength && generatedText.length <= maxLength) {
+            console.log("✅ Success with Pollinations.ai GET text generation");
+            console.log("Generated text:", generatedText);
+            return res.json({ 
+              caption: generatedText,
+              model: "pollinations-ai"
+            });
+          }
+        }
+      } catch (getError) {
+        console.error("Pollinations.ai GET error:", getError.message);
+      }
+
+      // Method 3: Try simple POST with prompt
+      try {
+        console.log("Trying simple POST method...");
+        const simplePostResponse = await fetch("https://text.pollinations.ai/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            prompt: textPrompt,
+            model: "openai"
+          })
+        });
+
+        if (simplePostResponse.ok) {
+          let generatedText = await simplePostResponse.text();
+          
+          generatedText = generatedText
+            .replace(/^["']|["']$/g, '')
+            .replace(/^Advertisement:\s*/i, "")
+            .replace(/^Ad:\s*/i, "")
+            .trim();
+
+          if (isShortFormat) {
+            const lines = generatedText.split('\n').filter(line => line.trim());
+            generatedText = lines.slice(0, 2).join('\n');
+          }
+
+          const minLength = isShortFormat ? 10 : 30;
+          const maxLength = isShortFormat ? 400 : 1000;
+
+          if (generatedText.length >= minLength && generatedText.length <= maxLength) {
+            console.log("✅ Success with Pollinations.ai simple POST text generation");
+            console.log("Generated text:", generatedText);
+            return res.json({ 
+              caption: generatedText,
+              model: "pollinations-ai"
+            });
+          }
+        }
+      } catch (simplePostError) {
+        console.error("Pollinations.ai simple POST error:", simplePostError.message);
+      }
+
+      console.log("⚠️ All Pollinations.ai text generation methods failed, using templates");
     } catch (error) {
       console.error("Pollinations.ai text error:", error.message);
     }
@@ -194,32 +346,62 @@ app.post("/generate-image", async (req, res) => {
       // Encode prompt for URL
       const encodedPrompt = encodeURIComponent(imagePrompt);
       
-      // Generate image URL
-      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1080&height=1080&seed=${Date.now()}&nologo=true&model=flux`;
+      // Generate image URL - using flux model (or klein for faster generation)
+      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1080&height=1080&seed=${Date.now()}&nologo=true&model=flux&enhance=true`;
       
       console.log("Fetching AI-generated image from Pollinations.ai...");
+      console.log("Image URL:", pollinationsUrl);
       
-      // Fetch the generated image
-      const imageResponse = await fetch(pollinationsUrl);
+      // Fetch the generated image with timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+      
+      const imageResponse = await fetch(pollinationsUrl, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0'
+        }
+      });
+      
+      clearTimeout(timeoutId);
       
       if (imageResponse.ok) {
         const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
         
-        // Create canvas to add text overlay
-        const canvas = createCanvas(1080, 1080);
-        const ctx = canvas.getContext('2d');
+        try {
+          // Create canvas to add text overlay
+          const canvas = createCanvas(1080, 1080);
+          const ctx = canvas.getContext('2d');
+          
+          // Load and draw background image
+          const bgImage = await loadImage(imageBuffer);
+          ctx.drawImage(bgImage, 0, 0, 1080, 1080);
         
-        // Load and draw background image
-        const bgImage = await loadImage(imageBuffer);
-        ctx.drawImage(bgImage, 0, 0, 1080, 1080);
+        // Add gradient overlay in 3 layers for better text visibility
+        // Top layer (semi-transparent for any top text)
+        const topGradient = ctx.createLinearGradient(0, 0, 0, 300);
+        topGradient.addColorStop(0, 'rgba(0, 0, 0, 0.6)');
+        topGradient.addColorStop(0.5, 'rgba(0, 0, 0, 0.3)');
+        topGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = topGradient;
+        ctx.fillRect(0, 0, 1080, 300);
         
-        // Add gradient overlay at bottom for text readability
-        const gradient = ctx.createLinearGradient(0, 650, 0, 1080);
-        gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
-        gradient.addColorStop(0.3, 'rgba(0, 0, 0, 0.7)');
-        gradient.addColorStop(1, 'rgba(0, 0, 0, 0.92)');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, 1080, 1080);
+        // Middle layer (if needed for center text)
+        const middleGradient = ctx.createLinearGradient(0, 350, 0, 750);
+        middleGradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        middleGradient.addColorStop(0.5, 'rgba(0, 0, 0, 0.4)');
+        middleGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = middleGradient;
+        ctx.fillRect(0, 350, 1080, 400);
+        
+        // Bottom layer (main text area - larger for more text)
+        const bottomGradient = ctx.createLinearGradient(0, 650, 0, 1080);
+        bottomGradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        bottomGradient.addColorStop(0.2, 'rgba(0, 0, 0, 0.5)');
+        bottomGradient.addColorStop(0.5, 'rgba(0, 0, 0, 0.75)');
+        bottomGradient.addColorStop(1, 'rgba(0, 0, 0, 0.92)');
+        ctx.fillStyle = bottomGradient;
+        ctx.fillRect(0, 650, 1080, 430);
         
         // Add text overlay
         ctx.fillStyle = '#ffffff';
@@ -230,38 +412,117 @@ app.post("/generate-image", async (req, res) => {
         ctx.shadowOffsetY = 3;
         
         // Split text into lines and filter empty ones
-        const lines = adText.split('\n').filter(line => line.trim());
+        let lines = adText.split('\n').filter(line => line.trim());
         
-        // Calculate font size based on number of lines and text length
-        let fontSize = 60;
-        if (lines.length > 3) fontSize = 48;
-        if (lines.length > 5) fontSize = 42;
+        // Word wrap long lines to fit within canvas width
+        const maxWidth = 950;
+        const wrappedLines = [];
+        
+        // Helper function to wrap text
+        const wrapText = (text, maxWidth) => {
+          const words = text.split(' ');
+          const result = [];
+          let currentLine = words[0] || '';
+          
+          for (let i = 1; i < words.length; i++) {
+            const testLine = currentLine + ' ' + words[i];
+            ctx.font = 'bold 52px Arial, sans-serif';
+            const metrics = ctx.measureText(testLine);
+            if (metrics.width > maxWidth && currentLine.length > 0) {
+              result.push(currentLine);
+              currentLine = words[i];
+            } else {
+              currentLine = testLine;
+            }
+          }
+          if (currentLine.length > 0) {
+            result.push(currentLine);
+          }
+          return result;
+        };
+        
+        // Wrap all lines
+        lines.forEach(line => {
+          const wrapped = wrapText(line, maxWidth);
+          wrappedLines.push(...wrapped);
+        });
+        
+        lines = wrappedLines;
+        
+        // Calculate font size based on number of lines
+        let fontSize = 52;
+        if (lines.length > 6) fontSize = 46;
+        if (lines.length > 9) fontSize = 40;
+        if (lines.length > 12) fontSize = 36;
         
         ctx.font = `bold ${fontSize}px Arial, sans-serif`;
         
-        // Calculate starting Y position to center text in gradient area
-        const lineHeight = fontSize + 20;
-        const totalHeight = lines.length * lineHeight;
-        const startY = 1080 - totalHeight - 60;
+        // Distribute text evenly across 3 layers
+        const totalLines = lines.length;
+        const linesPerLayer = Math.ceil(totalLines / 3);
+        const lineHeight = fontSize + 14;
         
-        // Draw each line
-        lines.forEach((line, index) => {
-          const y = startY + (index * lineHeight);
-          ctx.fillText(line, 540, y);
+        // Layer 1: Top (0 to linesPerLayer)
+        const topLines = lines.slice(0, linesPerLayer);
+        const topStartY = 150;
+        topLines.forEach((line, index) => {
+          const y = topStartY + index * lineHeight;
+          const metrics = ctx.measureText(line);
+          if (metrics.width > maxWidth) {
+            ctx.font = `bold ${fontSize - 6}px Arial, sans-serif`;
+            ctx.fillText(line, 540, y);
+            ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+          } else {
+            ctx.fillText(line, 540, y);
+          }
+        });
+        
+        // Layer 2: Middle (linesPerLayer to linesPerLayer*2)
+        const middleLines = lines.slice(linesPerLayer, linesPerLayer * 2);
+        const middleStartY = 480;
+        middleLines.forEach((line, index) => {
+          const y = middleStartY + index * lineHeight;
+          const metrics = ctx.measureText(line);
+          if (metrics.width > maxWidth) {
+            ctx.font = `bold ${fontSize - 6}px Arial, sans-serif`;
+            ctx.fillText(line, 540, y);
+            ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+          } else {
+            ctx.fillText(line, 540, y);
+          }
+        });
+        
+        // Layer 3: Bottom (linesPerLayer*2 to end) - main layer
+        const bottomLines = lines.slice(linesPerLayer * 2);
+        const bottomStartY = 850;
+        bottomLines.forEach((line, index) => {
+          const y = bottomStartY + index * lineHeight;
+          const metrics = ctx.measureText(line);
+          if (metrics.width > maxWidth) {
+            ctx.font = `bold ${fontSize - 6}px Arial, sans-serif`;
+            ctx.fillText(line, 540, y);
+            ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+          } else {
+            ctx.fillText(line, 540, y);
+          }
         });
         
         // Convert to base64
         const finalImage = canvas.toDataURL('image/png');
         
-        console.log(`✅ Image generated successfully with ${animalType} and text overlay`);
-        return res.json({ 
-          imageUrl: finalImage,
-          model: "pollinations-ai",
-          animalType: animalType
-        });
+          console.log(`✅ Image generated successfully with ${animalType} and text overlay`);
+          return res.json({ 
+            imageUrl: finalImage,
+            model: "pollinations-ai",
+            animalType: animalType
+          });
+        } catch (canvasError) {
+          console.error("Canvas processing error:", canvasError.message);
+          throw new Error("Failed to process image with text overlay");
+        }
       }
       
-      throw new Error("Pollinations.ai image request failed");
+      throw new Error(`Pollinations.ai image request failed: ${imageResponse.status}`);
       
     } catch (error) {
       console.error("Pollinations.ai error:", error.message);
