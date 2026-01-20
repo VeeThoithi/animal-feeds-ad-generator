@@ -13,6 +13,13 @@ An AI-powered text and image ad generator for animal feeds that you can easily s
 - Secure API integration using `.env` file
 
 ---
+## Tech Stack
+- **Frontend:** JavaScript, CSS, HTML  
+- **Backend:** Node.js, Express.js  
+- **AI Integration:** Pollination.ai (for image generation)  
+- **Environment Variables:** `.env` file to store API keys 
+
+---
 
 ## Installation
 
